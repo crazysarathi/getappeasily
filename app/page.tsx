@@ -149,7 +149,7 @@ export default function AppLauncher() {
         </div>
 
         <div className="mb-6 rounded-lg border border-amber-700 bg-amber-950/40 p-4 text-sm text-amber-100">
-          <p className="font-semibold">Important</p>
+          <p className="font-semibold">Importanssssst</p>
           <p className="mt-1">
             If you open this site on Vercel or from another device by IP, it cannot see apps on
             your browser device. It only sees apps on the host machine running this app.
