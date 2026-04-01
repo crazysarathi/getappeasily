@@ -11,6 +11,16 @@ type InstalledApp = {
   name: string;
 };
 
+type RuntimeInfo = {
+  platform: string;
+  hostName: string;
+  hostType: 'vercel' | 'self-hosted';
+  readsAppsFrom: 'server';
+  canReadApps: boolean;
+  canLaunchApps: boolean;
+  warning: string | null;
+};
+
 const PLATFORM_LABELS: Record<string, string> = {
   win32: 'Windows',
   darwin: 'macOS',
@@ -23,6 +33,7 @@ export default function AppLauncher() {
   const [appsLoading, setAppsLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [platform, setPlatform] = useState('');
+  const [runtime, setRuntime] = useState<RuntimeInfo | null>(null);
   const [messageType, setMessageType] = useState<'success' | 'error' | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [availableApps, setAvailableApps] = useState<InstalledApp[]>([]);
@@ -45,6 +56,7 @@ export default function AppLauncher() {
 
         setPlatform(typeof data.platform === 'string' ? data.platform : '');
         setAvailableApps(Array.isArray(data.apps) ? data.apps : []);
+        setRuntime(data.runtime ?? null);
       } catch {
         if (!active) {
           return;
@@ -74,7 +86,9 @@ export default function AppLauncher() {
       : availableApps
   ).slice(0, 16);
 
-  const platformLabel = PLATFORM_LABELS[platform] || platform || 'this system';
+  const platformLabel = PLATFORM_LABELS[platform] || platform || 'unknown system';
+  const serverLabel = runtime?.hostType === 'vercel' ? 'Vercel' : runtime?.hostName || 'server';
+  const canLaunchApps = runtime?.canLaunchApps ?? false;
 
   const handleOpenApp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,6 +112,7 @@ export default function AppLauncher() {
       });
 
       const data = await response.json();
+      setRuntime(data.runtime ?? runtime);
 
       if (response.ok) {
         setMessage(data.message || `Opening ${appName}...`);
@@ -124,12 +139,25 @@ export default function AppLauncher() {
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-white mb-2">App Launcher</h1>
           <p className="text-slate-400">
-            Detects {platformLabel} and loads the apps available on this machine
+            This can only read and open apps on the machine running the Next.js server
           </p>
           <p className="text-xs text-slate-500 mt-2">
             {appsLoading
-              ? 'Reading installed apps...'
-              : `${availableApps.length} apps found on ${platformLabel}`}
+              ? 'Checking server runtime...'
+              : `${availableApps.length} apps found on ${serverLabel} (${platformLabel})`}
+          </p>
+        </div>
+
+        <div className="mb-6 rounded-lg border border-amber-700 bg-amber-950/40 p-4 text-sm text-amber-100">
+          <p className="font-semibold">Important</p>
+          <p className="mt-1">
+            If you open this site on Vercel or from another device by IP, it cannot see apps on
+            your browser device. It only sees apps on the host machine running this app.
+          </p>
+          {runtime?.warning && <p className="mt-2 text-amber-200">{runtime.warning}</p>}
+          <p className="mt-2 text-amber-200">
+            To open apps from your current computer, run this project locally on that same
+            computer, or use a desktop app/native helper.
           </p>
         </div>
 
@@ -139,11 +167,15 @@ export default function AppLauncher() {
               type="text"
               list="installed-apps"
               placeholder={
-                appsLoading ? 'Loading installed apps...' : 'Type an installed app name'
+                appsLoading
+                  ? 'Loading apps from server...'
+                  : canLaunchApps
+                    ? 'Type an app installed on the server machine'
+                    : 'Desktop apps cannot be opened from this host'
               }
               value={appName}
               onChange={(e) => setAppName(e.target.value)}
-              disabled={loading}
+              disabled={loading || appsLoading || !canLaunchApps}
               className="bg-slate-700 border-slate-600 text-white placeholder-slate-400 text-lg py-6"
               autoFocus
             />
@@ -156,7 +188,7 @@ export default function AppLauncher() {
 
           <Button
             type="submit"
-            disabled={loading || appsLoading}
+            disabled={loading || appsLoading || !canLaunchApps}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3"
           >
             {loading ? (
@@ -218,7 +250,7 @@ export default function AppLauncher() {
 
         <div className="mt-8 pt-6 border-t border-slate-700">
           <p className="text-xs text-slate-400 uppercase tracking-wide mb-3">
-            {appName.trim() ? 'Matching apps' : `Installed apps on ${platformLabel}`}
+            {appName.trim() ? 'Matching server apps' : `Apps available on ${serverLabel}`}
           </p>
 
           {appsLoading ? (

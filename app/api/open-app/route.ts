@@ -38,6 +38,16 @@ type InstalledApp = {
   openTarget: OpenTarget;
 };
 
+type RuntimeInfo = {
+  platform: NodeJS.Platform;
+  hostName: string;
+  hostType: 'vercel' | 'self-hosted';
+  readsAppsFrom: 'server';
+  canReadApps: boolean;
+  canLaunchApps: boolean;
+  warning: string | null;
+};
+
 let appCache:
   | {
       expiresAt: number;
@@ -71,6 +81,40 @@ function serializeApps(apps: InstalledApp[]) {
     id: app.id,
     name: app.name,
   }));
+}
+
+function getRuntimeInfo(): RuntimeInfo {
+  const platform = process.platform;
+  const hostType = process.env.VERCEL ? 'vercel' : 'self-hosted';
+  const hostName = hostType === 'vercel' ? 'Vercel' : os.hostname();
+  const supportedPlatform = ['win32', 'darwin', 'linux'].includes(platform);
+  const hasLinuxDesktop = Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+
+  const canReadApps =
+    supportedPlatform && hostType !== 'vercel' && (platform !== 'linux' || hasLinuxDesktop);
+  const canLaunchApps = canReadApps;
+
+  let warning: string | null = null;
+
+  if (hostType === 'vercel') {
+    warning =
+      'This API is running on Vercel. A hosted website cannot read or open apps on the visitor device.';
+  } else if (!supportedPlatform) {
+    warning = `This server is running on unsupported platform "${platform}".`;
+  } else if (platform === 'linux' && !hasLinuxDesktop) {
+    warning =
+      'This Linux server has no desktop session, so desktop apps cannot be listed or opened.';
+  }
+
+  return {
+    platform,
+    hostName,
+    hostType,
+    readsAppsFrom: 'server',
+    canReadApps,
+    canLaunchApps,
+    warning,
+  };
 }
 
 function sortApps(apps: InstalledApp[]) {
@@ -109,7 +153,12 @@ async function readTextFile(filePath: string) {
 }
 
 async function getInstalledApps(forceRefresh = false) {
-  const platform = process.platform;
+  const runtimeInfo = getRuntimeInfo();
+  const { platform } = runtimeInfo;
+
+  if (!runtimeInfo.canReadApps) {
+    return [];
+  }
 
   if (
     !forceRefresh &&
@@ -520,11 +569,13 @@ async function openInstalledApp(app: InstalledApp) {
 export async function GET() {
   try {
     const apps = await getInstalledApps();
+    const runtimeInfo = getRuntimeInfo();
 
     return NextResponse.json({
-      platform: process.platform,
+      platform: runtimeInfo.platform,
       count: apps.length,
       apps: serializeApps(apps),
+      runtime: runtimeInfo,
     });
   } catch (error) {
     console.error('[open-app] Failed to list apps:', error);
@@ -540,14 +591,20 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const appName = typeof body?.appName === 'string' ? body.appName.trim() : '';
+    const runtimeInfo = getRuntimeInfo();
 
     if (!appName) {
       return NextResponse.json({ error: 'Please provide an app name.' }, { status: 400 });
     }
 
-    if (!['win32', 'darwin', 'linux'].includes(process.platform)) {
+    if (!runtimeInfo.canLaunchApps) {
       return NextResponse.json(
-        { error: `Unsupported operating system: ${process.platform}` },
+        {
+          error:
+            runtimeInfo.warning ||
+            'This server cannot open desktop apps for the device visiting the site.',
+          runtime: runtimeInfo,
+        },
         { status: 400 },
       );
     }
@@ -559,7 +616,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: `"${appName}" was not found on this system.`,
-          platform: process.platform,
+          platform: runtimeInfo.platform,
+          runtime: runtimeInfo,
           suggestions: buildSuggestions(apps, appName),
         },
         { status: 404 },
@@ -572,7 +630,8 @@ export async function POST(request: NextRequest) {
       success: true,
       message: `Opening ${matchedApp.name}...`,
       openedApp: matchedApp.name,
-      platform: process.platform,
+      platform: runtimeInfo.platform,
+      runtime: runtimeInfo,
     });
   } catch (error) {
     console.error('[open-app] Failed to open app:', error);
